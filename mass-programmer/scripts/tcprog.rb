@@ -270,6 +270,8 @@ data_length = nil
 data_name   = nil
 data_addr   = nil
 call_addr   = nil
+tcrt_file   = nil
+data        = nil
 
 # parse command line args
 OptionParser.new do |opts|
@@ -278,20 +280,20 @@ OptionParser.new do |opts|
     exit 1
   end
 
-  opts.on("-l", "--loader FILE", "write a loader to the tapecart") do |arg|
-    loader_file = arg
-  end
-
-  opts.on("-n", "--name STRING", "set displayed file name") do |arg|
-    data_name = asc2pet(arg)
-  end
-
   opts.on("-c", "--calladdr ADDRESS", "set call address") do |arg|
     call_addr = arg.to_i(0)
   end
 
+  opts.on("-l", "--loader FILE", "write a loader to the tapecart") do |arg|
+    loader_file = arg
+  end
+
   opts.on("-L", "--length NUM", "set initial data length") do |arg|
     data_length = arg.to_i(0)
+  end
+
+  opts.on("-n", "--name STRING", "set displayed file name") do |arg|
+    data_name = asc2pet(arg)
   end
 
   opts.on("-o", "--offset NUM", "set initial data offset") do |arg|
@@ -300,6 +302,10 @@ OptionParser.new do |opts|
       puts "ERROR: Data offset must be below 0x10000"
       exit 2
     end
+  end
+
+  opts.on("-t", "--tcrt FILE", "write a tcrt image to the tapecart") do |arg|
+    tcrt_file = arg
   end
 end.parse!
 
@@ -333,7 +339,6 @@ puts "Total size: #{totalsize} bytes"
 puts "Page size : #{pagesize} bytes"
 puts "Erase size: #{erasesize * pagesize} bytes"
 
-
 if !loader_file.nil?
   # write a loader
   loader = File.binread(loader_file)
@@ -353,6 +358,30 @@ if !loader_file.nil?
     puts "Loader verify mismatch: got #{readback.length} byte"
     exit 1
   end
+end
+
+# write tcrt file
+if !tcrt_file.nil?
+  tcrt_data = File.binread(tcrt_file)
+  tcrt_header = tcrt_data.byteslice(0,216)
+  tcrt_flash = tcrt_data.byteslice(216,tcrt_data.length-215)
+
+  tcrt_addr        = tcrt_header.byteslice(18,2).unpack("v").join.to_i
+  tcrt_len         = tcrt_header.byteslice(20,2).unpack("v").join.to_i
+  tcrt_calladdr    = tcrt_header.byteslice(22,2).unpack("v").join.to_i
+  tcrt_name        = tcrt_header.byteslice(24,16)
+  tcrt_con_len     = tcrt_header.byteslice(212,4).unpack("V").join.to_i  
+
+  puts "data address:\t#{tcrt_addr}\t\t\t0x#{sprintf("%04x", tcrt_addr)}"
+  puts "data length:\t#{tcrt_len}\t\t\t0x#{sprintf("%04x", tcrt_len)}"
+  puts "call address:\t#{tcrt_calladdr}\t\t\t0x#{sprintf("%04x", tcrt_calladdr)}"
+  puts "file name:\t#{tcrt_name} "
+  puts "content length:\t#{tcrt_con_len}\t\t\t0x#{sprintf("%04x", tcrt_con_len)}"
+
+  data = tcrt_flash
+  data_length = tcrt_len
+  call_addr = tcrt_calladdr
+  data_name = asc2pet(tcrt_name)
 end
 
 # write datafile
@@ -377,7 +406,9 @@ if !data_file.nil?
     data = [call_addr].pack("v") + BASIC_STARTER + data[2..-1]
     data_length = data.length
   end
+end
 
+if (!data_file.nil? || !tcrt_file.nil?)
   # pad to a multiple of the erase size
   if (data.length % (erasesize * pagesize)) != 0
     remain = erasesize * pagesize - data.length % (erasesize * pagesize)
